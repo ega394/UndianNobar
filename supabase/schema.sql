@@ -3,24 +3,20 @@
 --  Jalankan seluruh isi file ini di: Supabase Dashboard → SQL Editor → Run
 -- ============================================================================
 
--- Peserta undian.
+-- Peserta undian (disimpan polos — sederhana).
 --  * raffle_number : nomor undian, otomatis & unik (identity) → 1, 2, 3, ...
---  * nik_hash      : HMAC dari NIK, dipakai sebagai kunci ANTI-DOBEL (unique)
---  * nik_enc       : NIK terenkripsi (AES-256-GCM) — hanya bisa dibuka server
---  * hp_hash       : HMAC dari No HP, dipakai membatasi maks 3 pendaftaran/HP
---  * hp_enc        : No HP terenkripsi
+--  * nik           : NIK, UNIQUE → kunci anti-dobel (1 NIK hanya bisa daftar sekali)
+--  * hp            : No HP (boleh dipakai beberapa orang, dibatasi maks 3 di aplikasi)
 create table if not exists participants (
   raffle_number bigint generated always as identity primary key,
   nama          text        not null,
-  nik_hash      text        not null unique,
-  nik_enc       text        not null,
-  hp_hash       text        not null,
-  hp_enc        text        not null,
+  nik           text        not null unique,
+  hp            text        not null,
   gender        text,
   created_at    timestamptz not null default now()
 );
 
-create index if not exists idx_participants_hp      on participants (hp_hash);
+create index if not exists idx_participants_hp      on participants (hp);
 create index if not exists idx_participants_created on participants (created_at);
 
 -- Sesi pengundian (commit-reveal, agar hasil bisa diaudit).
@@ -30,6 +26,7 @@ create index if not exists idx_participants_created on participants (created_at)
 --  * winners    : daftar nomor undian pemenang (hasil deterministik dari seed)
 create table if not exists draws (
   id           bigint generated always as identity primary key,
+  prize        text,                                        -- nama hadiah/doorprize
   seed_hash    text        not null,
   seed         text,
   n_winners    int         not null,
@@ -39,6 +36,9 @@ create table if not exists draws (
   committed_at timestamptz not null default now(),
   revealed_at  timestamptz
 );
+
+-- Bila tabel draws sudah terlanjur dibuat tanpa kolom prize, jalankan:
+alter table draws add column if not exists prize text;
 
 -- Pengaturan acara (baris tunggal, id = 1).
 create table if not exists settings (

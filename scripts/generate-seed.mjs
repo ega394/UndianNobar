@@ -1,23 +1,14 @@
 // scripts/generate-seed.mjs
-// Generator data uji untuk aplikasi Undian Nobar.
+// Generator data uji untuk aplikasi Undian Nobar (penyimpanan polos).
 //
-// Menghasilkan N peserta acak (nama, No HP, NIK) yang VALID sesuai validasi
-// aplikasi, lalu:
-//   • MODE=csv  → tulis `seed_participants.csv` (siap diimpor ke tabel Supabase,
-//                 kolom sudah di-hash & dienkripsi memakai DATA_SECRET) +
-//                 `seed_plain.csv` (referensi NIK/HP asli untuk pengetesan).
-//   • MODE=api  → kirim langsung ke endpoint /api/register aplikasi yang sudah
-//                 online (menguji seluruh alur, tanpa perlu tahu DATA_SECRET).
+//   • MODE=csv  → tulis `seed_participants.csv` siap diimpor ke tabel Supabase.
+//                 Kolom: nama, nik, hp, gender  (polos, tanpa hash/enkripsi).
+//   • MODE=api  → kirim langsung ke endpoint /api/register aplikasi yang online.
 //
 // Cara pakai:
-//   # Impor lewat Supabase (butuh DATA_SECRET yang SAMA dengan yang di Vercel):
-//   DATA_SECRET="<secret-anda>" N=2000 MODE=csv node scripts/generate-seed.mjs
-//
-//   # Atau seed lewat API aplikasi yang sudah dideploy:
+//   N=2000 MODE=csv node scripts/generate-seed.mjs
 //   APP_URL="https://namaapp.vercel.app" N=2000 MODE=api node scripts/generate-seed.mjs
-//
-// Reuse fungsi hash/enkripsi/validasi dari aplikasi → dijamin kompatibel.
-import { encrypt, hmac, validateNIK, validatePhone } from "../api/_lib.js";
+import { validateNIK, validatePhone } from "../api/_lib.js";
 import { writeFileSync } from "node:fs";
 
 const N = parseInt(process.env.N || process.argv[2] || "2000", 10);
@@ -71,53 +62,22 @@ while (rows.length < N && guard < N * 50) {
   const hp = genPhone();
   if (!validatePhone(hp).ok) continue;
   seen.add(nik);
-  const nama =
-    (gender === "L" ? pick(MALE) : pick(FEMALE)) + " " + pick(LAST);
+  const nama = (gender === "L" ? pick(MALE) : pick(FEMALE)) + " " + pick(LAST);
   rows.push({ nama, gender: v.gender, nik, hp });
 }
-if (rows.length < N) {
-  console.error(`Hanya berhasil membuat ${rows.length}/${N} entri unik.`);
-}
+if (rows.length < N) console.error(`Hanya berhasil membuat ${rows.length}/${N} entri unik.`);
 
 // ── Output ───────────────────────────────────────────────────────────────────
-function csvCell(s) {
-  return `"${String(s).replace(/"/g, '""')}"`;
-}
+const csvCell = (s) => `"${String(s).replace(/"/g, '""')}"`;
 
 if (MODE === "csv") {
-  const secret = process.env.DATA_SECRET;
-  if (!secret || secret.length < 16) {
-    console.error(
-      "ERROR: set DATA_SECRET (string acak ≥32 karakter, sama dengan yang di Vercel) untuk mode csv."
-    );
-    process.exit(1);
-  }
-
-  const header = ["nama", "gender", "nik_hash", "nik_enc", "hp_hash", "hp_enc"];
-  const lines = [header.join(",")];
+  const lines = ["nama,nik,hp,gender"];
   for (const r of rows) {
-    lines.push(
-      [
-        csvCell(r.nama),
-        csvCell(r.gender),
-        csvCell(hmac("nik:" + r.nik)),
-        csvCell(encrypt(r.nik)),
-        csvCell(hmac("hp:" + r.hp)),
-        csvCell(encrypt(r.hp)),
-      ].join(",")
-    );
+    lines.push([csvCell(r.nama), csvCell(r.nik), csvCell(r.hp), csvCell(r.gender)].join(","));
   }
   writeFileSync("seed_participants.csv", lines.join("\n"));
-
-  const plain = ["nama,gender,hp,nik"];
-  for (const r of rows) {
-    plain.push([csvCell(r.nama), csvCell(r.gender), csvCell(r.hp), csvCell(r.nik)].join(","));
-  }
-  writeFileSync("seed_plain.csv", plain.join("\n"));
-
-  console.log(`✔ ${rows.length} entri ditulis:`);
-  console.log("  • seed_participants.csv  → impor ke tabel participants di Supabase");
-  console.log("  • seed_plain.csv         → referensi NIK/HP asli untuk pengetesan manual");
+  console.log(`✔ ${rows.length} entri ditulis ke seed_participants.csv`);
+  console.log("  Impor ke Supabase → Table Editor → participants → Import data from CSV.");
 } else if (MODE === "api") {
   const APP = (process.env.APP_URL || "").replace(/\/$/, "");
   if (!APP) {
@@ -125,9 +85,7 @@ if (MODE === "csv") {
     process.exit(1);
   }
   const CONCURRENCY = parseInt(process.env.CONCURRENCY || "10", 10);
-  let ok = 0, dup = 0, fail = 0, done = 0;
-  let idx = 0;
-
+  let ok = 0, dup = 0, fail = 0, done = 0, idx = 0;
   async function worker() {
     while (idx < rows.length) {
       const r = rows[idx++];

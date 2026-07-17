@@ -1,14 +1,7 @@
 // api/_lib.js — utilitas bersama untuk seluruh serverless function.
 // (Nama diawali underscore → tidak diperlakukan sebagai route oleh Vercel.)
 
-import {
-  createHash,
-  createHmac,
-  randomBytes,
-  createCipheriv,
-  createDecipheriv,
-  timingSafeEqual,
-} from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 // ── Konfigurasi dari environment ────────────────────────────────────────────
 const SUPA_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
@@ -22,38 +15,14 @@ const PANITIA_PASSWORD = process.env.PANITIA_PASSWORD || "panitia123";
 
 export const CONFIGURED = Boolean(SUPA_URL && SUPA_KEY);
 
-// Kunci turunan: enkripsi (AES) & MAC (hashing) dipisah dari secret mentah.
-const ENC_KEY = createHash("sha256").update("undian-enc:" + DATA_SECRET).digest(); // 32 byte
+// Kunci untuk menandatangani token sesi login panitia (bukan untuk data).
 const MAC_KEY = "undian-mac:" + DATA_SECRET;
 
-// ── Hashing ─────────────────────────────────────────────────────────────────
 export function sha256hex(s) {
   return createHash("sha256").update(String(s)).digest("hex");
 }
 export function hmac(s) {
   return createHmac("sha256", MAC_KEY).update(String(s)).digest("hex");
-}
-
-// ── Enkripsi simetris (AES-256-GCM) → base64(iv|tag|ciphertext) ─────────────
-export function encrypt(plain) {
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", ENC_KEY, iv);
-  const ct = Buffer.concat([cipher.update(String(plain), "utf8"), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return Buffer.concat([iv, tag, ct]).toString("base64");
-}
-export function decrypt(b64) {
-  try {
-    const buf = Buffer.from(String(b64), "base64");
-    const iv = buf.subarray(0, 12);
-    const tag = buf.subarray(12, 28);
-    const ct = buf.subarray(28);
-    const d = createDecipheriv("aes-256-gcm", ENC_KEY, iv);
-    d.setAuthTag(tag);
-    return Buffer.concat([d.update(ct), d.final()]).toString("utf8");
-  } catch {
-    return null;
-  }
 }
 
 // ── Klien Supabase (REST / PostgREST) ───────────────────────────────────────

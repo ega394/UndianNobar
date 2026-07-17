@@ -7,7 +7,7 @@ Aplikasi undian untuk acara **nonton bareng**. Penonton scan QR → isi **Nama, 
 1. **Anti-dobel** — 1 NIK hanya bisa mendaftar sekali (unique constraint di database).
 2. **NIK sebagai patokan utama** — divalidasi struktur 16 digit (kode wilayah + tanggal lahir).
 3. **Nyempang HP** — satu No HP boleh dipakai untuk **maksimal 3** pendaftaran (orang tanpa HP bisa numpang).
-4. **Privasi** — NIK & No HP disimpan **terenkripsi** (AES-256-GCM) dan **disensor** di layar publik (`3201********0007`, `0812****7890`).
+4. **Privasi** — NIK & No HP **disensor** di layar publik (`3201********0007`, `0812****7890`). Data lengkap hanya terlihat di panel panitia (terkunci password). Penyimpanan polos + Row Level Security (akses hanya dari server).
 5. **Undian adil** — pemenang ditentukan deterministik dari sebuah *seed*; **hash seed ditampilkan sebelum penarikan**, seed dibuka setelahnya, sehingga hasil bisa diaudit dan panitia tidak bisa mengatur pemenang.
 
 ## Halaman
@@ -41,10 +41,10 @@ Salin `.env.example` → `.env` (untuk lokal) atau isi di **Vercel → Settings 
 | ---------------------- | ----------------------------------------------------------------- |
 | `SUPABASE_URL`         | Project URL Supabase                                              |
 | `SUPABASE_SERVICE_KEY` | **service_role** key (rahasia, hanya dipakai serverless function) |
-| `DATA_SECRET`          | String acak ≥32 karakter (`openssl rand -hex 32`) — kunci enkripsi & hashing |
+| `DATA_SECRET`          | String acak ≥32 karakter (`openssl rand -hex 32`) — hanya untuk menandatangani token login panitia |
 | `PANITIA_PASSWORD`     | Password login panel panitia                                     |
 
-> ⚠️ `DATA_SECRET` dipakai untuk enkripsi NIK/HP **dan** untuk hashing anti-dobel. Jangan pernah mengubahnya setelah ada data masuk, dan jangan bocorkan.
+> `DATA_SECRET` kini hanya untuk token login panitia — mengubahnya hanya memaksa panitia login ulang, tidak memengaruhi data.
 
 ### 3. Jalankan
 
@@ -100,7 +100,14 @@ const winners = pool
 
 ## Catatan keamanan & privasi
 
-- NIK & No HP **tidak pernah** dikirim ke halaman publik/layar; hanya versi tersensor.
-- Data lengkap hanya bisa dibuka di panel panitia (butuh password) dan dipakai untuk mencocokkan KTP pemenang.
+- Data disimpan **polos** (nama, NIK, No HP apa adanya) demi kesederhanaan. Perlindungannya: tabel memakai **Row Level Security** dan hanya diakses serverless function via `service_role` key — anon key dari browser tidak bisa membaca tabel.
+- Ke halaman publik/layar hanya dikirim versi **tersensor** NIK & No HP; data lengkap hanya terlihat di panel panitia (butuh password) untuk mencocokkan KTP pemenang.
 - Validasi NIK bersifat **struktural** (bukan verifikasi Dukcapil) — menyaring NIK asal-ketik, bukan jaminan identitas.
-- Seluruh tabel memakai **Row Level Security**; akses data hanya lewat serverless function dengan service key.
+
+### Mengisi data uji (opsional)
+`scripts/generate-seed.mjs` membuat 2000 data acak valid:
+```bash
+N=2000 MODE=csv node scripts/generate-seed.mjs   # → seed_participants.csv, impor via Supabase Table Editor
+# atau seed lewat API aplikasi yang sudah online:
+APP_URL="https://namaapp.vercel.app" N=2000 MODE=api node scripts/generate-seed.mjs
+```

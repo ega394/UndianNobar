@@ -23,7 +23,6 @@ import {
   makeToken,
   sha256hex,
   drawWinners,
-  decrypt,
   pad,
   sbGet,
   sbCount,
@@ -49,19 +48,17 @@ async function previousWinners() {
 async function winnersDetail(numbers) {
   if (!numbers.length) return [];
   const rows = await sbGet(
-    `participants?raffle_number=in.(${numbers.join(",")})&select=raffle_number,nama,nik_enc,hp_enc`
+    `participants?raffle_number=in.(${numbers.join(",")})&select=raffle_number,nama,nik,hp`
   );
   const byNum = new Map((rows || []).map((r) => [r.raffle_number, r]));
   return numbers.map((n) => {
     const r = byNum.get(n);
-    const nik = r ? decrypt(r.nik_enc) : null;
-    const hp = r ? decrypt(r.hp_enc) : null;
     return {
       nomor: pad(n),
       raffle_number: n,
       nama: r?.nama || "—",
-      nik: nik || "—",
-      hp: hp || "—",
+      nik: r?.nik || "—",
+      hp: r?.hp || "—",
     };
   });
 }
@@ -96,10 +93,11 @@ export default async function handler(req, res) {
           sbCount("participants?raffle_number=gte.0"),
           sbCount("participants?gender=eq.L"),
           sbCount("participants?gender=eq.P"),
-          sbGet("draws?select=id,seed_hash,n_winners,pool,winners,status,committed_at,revealed_at&order=id.desc"),
+          sbGet("draws?select=id,prize,seed_hash,n_winners,pool,winners,status,committed_at,revealed_at&order=id.desc"),
         ]);
         const drawList = (draws || []).map((d) => ({
           id: d.id,
+          prize: d.prize || null,
           status: d.status,
           seed_hash: d.seed_hash,
           n_winners: d.n_winners,
@@ -124,7 +122,7 @@ export default async function handler(req, res) {
         const to = from + size - 1;
         const q = String(req.query.q || "").trim();
 
-        let filter = "participants?select=raffle_number,nama,nik_enc,hp_enc,gender,created_at";
+        let filter = "participants?select=raffle_number,nama,nik,hp,gender,created_at";
         if (q) {
           if (/^\d+$/.test(q)) filter += `&raffle_number=eq.${parseInt(q, 10)}`;
           else filter += `&nama=ilike.*${encodeURIComponent(q)}*`;
@@ -144,8 +142,8 @@ export default async function handler(req, res) {
           raffle_number: r.raffle_number,
           nama: r.nama,
           gender: r.gender,
-          nik: decrypt(r.nik_enc) || "—",
-          hp: decrypt(r.hp_enc) || "—",
+          nik: r.nik,
+          hp: r.hp,
           created_at: r.created_at,
         }));
         return res.status(200).json({ items, page, size, total: totalMatched, hasMore: to + 1 < totalMatched });
@@ -155,7 +153,7 @@ export default async function handler(req, res) {
         const number = parseInt(String(req.query.number || ""), 10);
         if (!number) return res.status(400).json({ error: "Parameter number wajib." });
         const rows = await sbGet(
-          `participants?raffle_number=eq.${number}&select=raffle_number,nama,nik_enc,hp_enc,gender,created_at`
+          `participants?raffle_number=eq.${number}&select=raffle_number,nama,nik,hp,gender,created_at`
         );
         const r = rows?.[0];
         if (!r) return res.status(404).json({ error: "Peserta tidak ditemukan." });
@@ -163,8 +161,8 @@ export default async function handler(req, res) {
           nomor: pad(r.raffle_number),
           nama: r.nama,
           gender: r.gender,
-          nik: decrypt(r.nik_enc) || "—",
-          hp: decrypt(r.hp_enc) || "—",
+          nik: r.nik,
+          hp: r.hp,
           created_at: r.created_at,
         });
       }
@@ -177,6 +175,7 @@ export default async function handler(req, res) {
         const winners = d.status === "revealed" ? await winnersDetail((d.winners || []).map(Number)) : [];
         return res.status(200).json({
           id: d.id,
+          prize: d.prize || null,
           status: d.status,
           seed_hash: d.seed_hash,
           seed: d.status === "revealed" ? d.seed : null,
@@ -211,9 +210,11 @@ export default async function handler(req, res) {
         if (!Number.isFinite(n) || n < 1) n = 1;
         if (n > pool.length) n = pool.length;
 
+        const prize = String(body.prize || "").trim().slice(0, 80) || null;
         const seed = randomBytes(32).toString("hex");
         const seed_hash = sha256hex(seed);
         const ins = await sbInsert("draws", {
+          prize,
           seed_hash,
           seed,
           n_winners: n,
@@ -225,6 +226,7 @@ export default async function handler(req, res) {
         return res.status(201).json({
           ok: true,
           id: d.id,
+          prize,
           seed_hash,
           n_winners: n,
           pool_size: pool.length,
@@ -250,6 +252,7 @@ export default async function handler(req, res) {
         return res.status(200).json({
           ok: true,
           id,
+          prize: d.prize || null,
           seed: d.seed,
           seed_hash: d.seed_hash,
           n_winners: d.n_winners,

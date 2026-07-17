@@ -7,6 +7,7 @@ const TOKEN_KEY = "undian_panitia_token";
 // ── Tipe ─────────────────────────────────────────────────────────────────────
 type Draw = {
   id: number;
+  prize: string | null;
   status: "committed" | "revealed";
   seed_hash: string;
   n_winners: number;
@@ -271,24 +272,28 @@ function DrawPanel({
   action: <T>(fn: () => Promise<T>) => Promise<T | undefined>;
 }) {
   const [n, setN] = useState(1);
-  const [result, setResult] = useState<WinnerDetail[] | null>(null);
+  const [prize, setPrize] = useState("");
+  const [result, setResult] = useState<{ winners: WinnerDetail[]; prize: string | null } | null>(null);
   const [seedInfo, setSeedInfo] = useState<{ seed: string; seed_hash: string } | null>(null);
 
   async function prepare() {
     setResult(null);
     setSeedInfo(null);
-    await action(() => apiPost("panitia?op=prepare", { n_winners: n }, token));
+    const ok = await action(() =>
+      apiPost("panitia?op=prepare", { n_winners: n, prize: prize.trim() }, token)
+    );
+    if (ok) setPrize("");
   }
   async function reveal(id: number) {
     const r = await action(() =>
-      apiPost<{ winners: WinnerDetail[]; seed: string; seed_hash: string }>(
+      apiPost<{ winners: WinnerDetail[]; seed: string; seed_hash: string; prize: string | null }>(
         "panitia?op=reveal",
         { id },
         token
       )
     );
     if (r) {
-      setResult(r.winners);
+      setResult({ winners: r.winners, prize: r.prize });
       setSeedInfo({ seed: r.seed, seed_hash: r.seed_hash });
     }
   }
@@ -297,12 +302,12 @@ function DrawPanel({
     await action(() => apiPost("panitia?op=cancel_draw", { id }, token));
   }
   async function viewRevealed(id: number) {
-    const r = await apiGet<{ winners: WinnerDetail[]; seed: string; seed_hash: string }>(
+    const r = await apiGet<{ winners: WinnerDetail[]; seed: string; seed_hash: string; prize: string | null }>(
       `panitia?op=draw_detail&id=${id}`,
       token
     ).catch(() => null);
     if (r) {
-      setResult(r.winners);
+      setResult({ winners: r.winners, prize: r.prize });
       setSeedInfo({ seed: r.seed, seed_hash: r.seed_hash });
     }
   }
@@ -312,41 +317,58 @@ function DrawPanel({
   return (
     <Section title="Pengundian (adil & dapat diverifikasi)">
       {!committed ? (
-        <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
-          <label className="flex-1">
-            <span className="block text-sm text-slate-300 mb-1">Jumlah pemenang ditarik</span>
-            <div className="flex gap-2">
-              {[1, 5, 10].map((v) => (
-                <button
-                  key={v}
-                  onClick={() => setN(v)}
-                  className={`rounded-lg px-3 py-2 text-sm font-semibold ${
-                    n === v ? "bg-indigo-500 text-white" : "bg-white/10 text-slate-300 hover:bg-white/20"
-                  }`}
-                >
-                  {v}
-                </button>
-              ))}
-              <input
-                type="number"
-                min={1}
-                value={n}
-                onChange={(e) => setN(Math.max(1, parseInt(e.target.value) || 1))}
-                className="w-24 rounded-lg bg-white/5 border border-white/12 px-3 py-2 text-white outline-none focus:border-indigo-400 tabular"
-              />
-            </div>
+        <div className="space-y-3">
+          <label className="block">
+            <span className="block text-sm text-slate-300 mb-1">
+              Hadiah / Doorprize <span className="text-slate-500">(tampil di layar publik)</span>
+            </span>
+            <input
+              value={prize}
+              onChange={(e) => setPrize(e.target.value)}
+              maxLength={80}
+              placeholder="mis. Sepeda Motor, Kulkas, Voucher Rp500.000"
+              className="w-full rounded-lg bg-white/5 border border-white/12 px-3 py-2 text-white outline-none focus:border-amber-400"
+            />
           </label>
-          <button
-            disabled={busy || !stats?.total}
-            onClick={prepare}
-            className="rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-black font-semibold px-4 py-2 text-sm"
-          >
-            🔒 Kunci Undian
-          </button>
+          <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
+            <label className="flex-1">
+              <span className="block text-sm text-slate-300 mb-1">Jumlah pemenang ditarik</span>
+              <div className="flex gap-2">
+                {[1, 5, 10].map((v) => (
+                  <button
+                    key={v}
+                    onClick={() => setN(v)}
+                    className={`rounded-lg px-3 py-2 text-sm font-semibold ${
+                      n === v ? "bg-indigo-500 text-white" : "bg-white/10 text-slate-300 hover:bg-white/20"
+                    }`}
+                  >
+                    {v}
+                  </button>
+                ))}
+                <input
+                  type="number"
+                  min={1}
+                  value={n}
+                  onChange={(e) => setN(Math.max(1, parseInt(e.target.value) || 1))}
+                  className="w-24 rounded-lg bg-white/5 border border-white/12 px-3 py-2 text-white outline-none focus:border-indigo-400 tabular"
+                />
+              </div>
+            </label>
+            <button
+              disabled={busy || !stats?.total}
+              onClick={prepare}
+              className="rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-black font-semibold px-4 py-2 text-sm"
+            >
+              🔒 Kunci Undian
+            </button>
+          </div>
         </div>
       ) : (
         <div className="rounded-xl bg-amber-500/10 border border-amber-500/25 p-4">
           <div className="text-amber-300 font-semibold">Undian dikunci — siap ditarik</div>
+          {committed.prize && (
+            <div className="text-lg font-bold text-white mt-1">🎁 {committed.prize}</div>
+          )}
           <div className="text-sm text-slate-300 mt-1">
             {committed.n_winners} pemenang dari {committed.pool_size} peserta.
           </div>
@@ -374,7 +396,9 @@ function DrawPanel({
       {/* Hasil tarik terbaru (data lengkap untuk menghubungi pemenang) */}
       {result && (
         <div className="mt-4">
-          <div className="text-sm font-semibold text-white mb-2">Pemenang (data lengkap — cocokkan KTP):</div>
+          <div className="text-sm font-semibold text-white mb-2">
+            Pemenang{result.prize ? ` 🎁 ${result.prize}` : ""} (data lengkap — cocokkan KTP):
+          </div>
           <div className="overflow-x-auto rounded-xl border border-white/10">
             <table className="w-full text-sm">
               <thead className="bg-white/5 text-slate-400 text-xs uppercase">
@@ -386,7 +410,7 @@ function DrawPanel({
                 </tr>
               </thead>
               <tbody>
-                {result.map((w) => (
+                {result.winners.map((w) => (
                   <tr key={w.raffle_number} className="border-t border-white/5">
                     <Td className="font-black text-indigo-300 tabular">{w.nomor}</Td>
                     <Td className="font-medium text-white">{w.nama}</Td>
@@ -423,7 +447,8 @@ function DrawPanel({
                 className="flex items-center justify-between rounded-lg bg-white/[0.03] border border-white/10 px-3 py-2"
               >
                 <div className="text-sm text-slate-300">
-                  <span className="text-white font-semibold">Undian #{d.id}</span> — {d.n_winners} pemenang:{" "}
+                  <span className="text-white font-semibold">Undian #{d.id}</span>
+                  {d.prize ? <span className="text-amber-300"> 🎁 {d.prize}</span> : ""} — {d.n_winners} pemenang:{" "}
                   <span className="tabular text-indigo-300">{d.winners.join(", ")}</span>
                 </div>
                 <button
