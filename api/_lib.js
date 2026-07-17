@@ -1,0 +1,241 @@
+// api/_lib.js — utilitas bersama untuk seluruh serverless function.
+// (Nama diawali underscore → tidak diperlakukan sebagai route oleh Vercel.)
+
+import {
+  createHash,
+  createHmac,
+  randomBytes,
+  createCipheriv,
+  createDecipheriv,
+  timingSafeEqual,
+} from "node:crypto";
+
+// ── Konfigurasi dari environment ────────────────────────────────────────────
+const SUPA_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+const SUPA_KEY =
+  process.env.SUPABASE_SERVICE_KEY ||
+  process.env.SUPABASE_KEY ||
+  process.env.SUPABASE_ANON_KEY ||
+  "";
+const DATA_SECRET = process.env.DATA_SECRET || "dev-insecure-secret-change-me-please-32b";
+const PANITIA_PASSWORD = process.env.PANITIA_PASSWORD || "panitia123";
+
+export const CONFIGURED = Boolean(SUPA_URL && SUPA_KEY);
+
+// Kunci turunan: enkripsi (AES) & MAC (hashing) dipisah dari secret mentah.
+const ENC_KEY = createHash("sha256").update("undian-enc:" + DATA_SECRET).digest(); // 32 byte
+const MAC_KEY = "undian-mac:" + DATA_SECRET;
+
+// ── Hashing ─────────────────────────────────────────────────────────────────
+export function sha256hex(s) {
+  return createHash("sha256").update(String(s)).digest("hex");
+}
+export function hmac(s) {
+  return createHmac("sha256", MAC_KEY).update(String(s)).digest("hex");
+}
+
+// ── Enkripsi simetris (AES-256-GCM) → base64(iv|tag|ciphertext) ─────────────
+export function encrypt(plain) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", ENC_KEY, iv);
+  const ct = Buffer.concat([cipher.update(String(plain), "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([iv, tag, ct]).toString("base64");
+}
+export function decrypt(b64) {
+  try {
+    const buf = Buffer.from(String(b64), "base64");
+    const iv = buf.subarray(0, 12);
+    const tag = buf.subarray(12, 28);
+    const ct = buf.subarray(28);
+    const d = createDecipheriv("aes-256-gcm", ENC_KEY, iv);
+    d.setAuthTag(tag);
+    return Buffer.concat([d.update(ct), d.final()]).toString("utf8");
+  } catch {
+    return null;
+  }
+}
+
+// ── Klien Supabase (REST / PostgREST) ───────────────────────────────────────
+const H = (extra = {}) => ({
+  "Content-Type": "application/json",
+  apikey: SUPA_KEY,
+  Authorization: `Bearer ${SUPA_KEY}`,
+  ...extra,
+});
+
+export async function sbGet(path) {
+  const r = await fetch(`${SUPA_URL}/rest/v1/${path}`, { headers: H() });
+  if (!r.ok) throw new Error(`Supabase GET ${path}: ${await r.text()}`);
+  return r.json();
+}
+
+// Fetch mentah yang mengembalikan status (untuk mendeteksi konflik unique 409).
+export async function sbFetch(path, init = {}) {
+  const r = await fetch(`${SUPA_URL}/rest/v1/${path}`, {
+    ...init,
+    headers: H(init.headers || {}),
+  });
+  const text = await r.text();
+  let data = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = text;
+  }
+  return { ok: r.ok, status: r.status, data, contentRange: r.headers.get("content-range") };
+}
+
+export async function sbInsert(table, body, { returning = true } = {}) {
+  return sbFetch(table, {
+    method: "POST",
+    headers: { Prefer: returning ? "return=representation" : "return=minimal" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function sbPatch(path, body) {
+  const r = await sbFetch(path, {
+    method: "PATCH",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(`Supabase PATCH ${path}: ${JSON.stringify(r.data)}`);
+  return r.data;
+}
+
+export async function sbDelete(path) {
+  const r = await sbFetch(path, { method: "DELETE", headers: { Prefer: "return=minimal" } });
+  if (!r.ok) throw new Error(`Supabase DELETE ${path}: ${JSON.stringify(r.data)}`);
+  return true;
+}
+
+// Hitung jumlah baris tanpa menarik seluruh data (pakai header Content-Range).
+export async function sbCount(pathWithFilter) {
+  const r = await sbFetch(`${pathWithFilter}&select=raffle_number`, {
+    method: "GET",
+    headers: { Prefer: "count=exact", Range: "0-0" },
+  });
+  const cr = r.contentRange || "";
+  const total = parseInt(cr.split("/")[1] || "0", 10);
+  return Number.isFinite(total) ? total : 0;
+}
+
+// ── Validasi NIK (16 digit, struktur wilayah + tanggal lahir) ───────────────
+// Catatan: tanpa koneksi Dukcapil ini hanya memeriksa STRUKTUR, bukan bukti
+// kepemilikan. Cukup kuat untuk menyaring NIK asal-ketik.
+export function validateNIK(nikRaw) {
+  const nik = String(nikRaw || "").replace(/\D/g, "");
+  if (nik.length !== 16) return { ok: false, reason: "NIK harus 16 digit angka." };
+
+  const prov = parseInt(nik.slice(0, 2), 10);
+  if (!(prov >= 11 && prov <= 94))
+    return { ok: false, reason: "Kode provinsi pada NIK tidak valid." };
+
+  let dd = parseInt(nik.slice(6, 8), 10);
+  const mm = parseInt(nik.slice(8, 10), 10);
+  const female = dd > 40;
+  if (female) dd -= 40;
+  if (!(dd >= 1 && dd <= 31)) return { ok: false, reason: "Tanggal lahir pada NIK tidak valid." };
+  if (!(mm >= 1 && mm <= 12)) return { ok: false, reason: "Bulan lahir pada NIK tidak valid." };
+
+  const seq = parseInt(nik.slice(12, 16), 10);
+  if (seq === 0) return { ok: false, reason: "Nomor urut pada NIK tidak valid." };
+
+  return { ok: true, nik, gender: female ? "P" : "L" };
+}
+
+// ── Normalisasi & validasi No HP Indonesia ──────────────────────────────────
+export function normPhone(hpRaw) {
+  let s = String(hpRaw || "").replace(/\D/g, "");
+  if (s.startsWith("62")) s = "0" + s.slice(2);
+  else if (s.startsWith("8")) s = "0" + s;
+  return s;
+}
+export function validatePhone(hpRaw) {
+  const hp = normPhone(hpRaw);
+  if (!/^08\d{7,12}$/.test(hp))
+    return { ok: false, reason: "No HP tidak valid. Gunakan format 08xxxxxxxxxx." };
+  return { ok: true, hp };
+}
+
+// ── Sensor untuk tampilan publik ────────────────────────────────────────────
+export function censorNIK(nik) {
+  const s = String(nik || "");
+  if (s.length < 16) return "****";
+  return s.slice(0, 4) + "*".repeat(8) + s.slice(12);
+}
+export function censorHP(hpRaw) {
+  const hp = normPhone(hpRaw);
+  if (hp.length < 7) return "****";
+  return hp.slice(0, 4) + "****" + hp.slice(-4);
+}
+
+// ── Format nomor undian → 4 digit (0001) ────────────────────────────────────
+export function pad(n) {
+  return String(n).padStart(4, "0");
+}
+
+// ── Logika undian yang bisa DIVERIFIKASI ─────────────────────────────────────
+// winners = N nomor dengan skor SHA-256(`${seed}:${nomor4digit}`) terkecil.
+// Bersifat deterministik: siapa pun yang tahu seed + daftar pool bisa hitung
+// ulang dan membuktikan panitia tidak mengatur pemenang.
+export function drawWinners(seed, pool, count) {
+  const scored = pool.map((n) => ({ n: Number(n), s: sha256hex(`${seed}:${pad(n)}`) }));
+  scored.sort((a, b) => (a.s < b.s ? -1 : a.s > b.s ? 1 : a.n - b.n));
+  return scored.slice(0, Math.max(0, count)).map((x) => x.n);
+}
+
+// ── Token sesi panitia (stateless, ditandatangani HMAC) ─────────────────────
+export function makeToken(ttlMs = 12 * 3600 * 1000) {
+  const exp = Date.now() + ttlMs;
+  const payload = `panitia.${exp}`;
+  const sig = hmac(payload);
+  return Buffer.from(`${payload}.${sig}`).toString("base64url");
+}
+export function verifyToken(token) {
+  try {
+    const raw = Buffer.from(String(token || ""), "base64url").toString("utf8");
+    const i = raw.lastIndexOf(".");
+    if (i < 0) return false;
+    const payload = raw.slice(0, i);
+    const sig = raw.slice(i + 1);
+    const expSig = hmac(payload);
+    if (sig.length !== expSig.length) return false;
+    if (!timingSafeEqual(Buffer.from(sig), Buffer.from(expSig))) return false;
+    const exp = parseInt(payload.split(".")[1], 10);
+    return Date.now() < exp;
+  } catch {
+    return false;
+  }
+}
+export function checkPassword(pw) {
+  const a = Buffer.from(String(pw || ""));
+  const b = Buffer.from(PANITIA_PASSWORD);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+export function requireAuth(req) {
+  const auth = req.headers["authorization"] || "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7) : req.headers["x-panitia-token"] || "";
+  return verifyToken(token);
+}
+
+// ── Helper HTTP ─────────────────────────────────────────────────────────────
+export function cors(res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Panitia-Token");
+}
+export function notConfigured(res) {
+  return res.status(503).json({
+    error:
+      "Server belum dikonfigurasi. Set SUPABASE_URL, SUPABASE_SERVICE_KEY, DATA_SECRET, dan PANITIA_PASSWORD di environment.",
+  });
+}
+export function getSettings() {
+  return sbGet("settings?id=eq.1&select=event_name,registration_open").then((r) => r?.[0] || {
+    event_name: "Nonton Bareng",
+    registration_open: true,
+  });
+}
