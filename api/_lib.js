@@ -10,10 +10,19 @@ const SUPA_KEY =
   process.env.SUPABASE_KEY ||
   process.env.SUPABASE_ANON_KEY ||
   "";
-const DATA_SECRET = process.env.DATA_SECRET || "dev-insecure-secret-change-me-please-32b";
-const PANITIA_PASSWORD = process.env.PANITIA_PASSWORD || "panitia123";
+const DEFAULT_SECRET = "dev-insecure-secret-change-me-please-32b";
+const DEFAULT_PASSWORD = "panitia123";
+const DATA_SECRET = process.env.DATA_SECRET || DEFAULT_SECRET;
+const PANITIA_PASSWORD = process.env.PANITIA_PASSWORD || DEFAULT_PASSWORD;
 
 export const CONFIGURED = Boolean(SUPA_URL && SUPA_KEY);
+
+// Konfigurasi aman? (kredensial sudah diganti dari default & cukup panjang)
+export const SECURE_CONFIG =
+  DATA_SECRET !== DEFAULT_SECRET &&
+  DATA_SECRET.length >= 16 &&
+  PANITIA_PASSWORD !== DEFAULT_PASSWORD &&
+  PANITIA_PASSWORD.length >= 6;
 
 // Kunci untuk menandatangani token sesi login panitia (bukan untuk data).
 const MAC_KEY = "undian-mac:" + DATA_SECRET;
@@ -201,6 +210,54 @@ export function notConfigured(res) {
     error:
       "Server belum dikonfigurasi. Set SUPABASE_URL, SUPABASE_SERVICE_KEY, DATA_SECRET, dan PANITIA_PASSWORD di environment.",
   });
+}
+export function insecureConfig(res) {
+  return res.status(503).json({
+    error:
+      "Konfigurasi tidak aman: setel DATA_SECRET (≥16 karakter acak) dan PANITIA_PASSWORD (≥6 karakter) yang bukan nilai default di environment Vercel, lalu redeploy.",
+  });
+}
+
+// ── Rate limiter sederhana (in-memory per instance) ─────────────────────────
+const RL = new Map();
+export function getIP(req) {
+  return (
+    req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
+    req.headers["x-real-ip"] ||
+    req.socket?.remoteAddress ||
+    "unknown"
+  );
+}
+export function rateLimit(key, max, windowMs) {
+  const now = Date.now();
+  const e = RL.get(key) || { count: 0, resetAt: now + windowMs };
+  if (now > e.resetAt) {
+    e.count = 0;
+    e.resetAt = now + windowMs;
+  }
+  e.count++;
+  RL.set(key, e);
+  if (RL.size > 5000) for (const [k, v] of RL) if (now > v.resetAt) RL.delete(k);
+  return e.count <= max;
+}
+
+// Ambil SELURUH raffle_number peserta dgn keyset pagination (lewati batas
+// default PostgREST yang bisa memotong hasil di ~1000 baris).
+export async function allRaffleNumbers() {
+  const out = [];
+  const PAGE = 1000;
+  let last = -1;
+  // Loop sampai halaman kosong — aman walau server membatasi baris per request.
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const rows = await sbGet(
+      `participants?select=raffle_number&raffle_number=gt.${last}&order=raffle_number.asc&limit=${PAGE}`
+    );
+    if (!rows.length) break;
+    for (const r of rows) out.push(r.raffle_number);
+    last = rows[rows.length - 1].raffle_number;
+  }
+  return out;
 }
 export function getSettings() {
   return sbGet("settings?id=eq.1&select=event_name,registration_open").then((r) => r?.[0] || {
