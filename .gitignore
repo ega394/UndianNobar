@@ -1,6 +1,8 @@
 node_modules
 dist
 *.tsbuildinfo
+seed_participants.csv
+seed_plain.csv
 .vercel
 .env
 .env.local

@@ -28,8 +28,8 @@ type Participant = {
   raffle_number: number;
   nama: string;
   gender: string | null;
-  nik_masked: string;
-  hp_masked: string;
+  nik: string;
+  hp: string;
   created_at: string;
 };
 
@@ -448,7 +448,6 @@ function ParticipantsPanel({ token }: { token: string }) {
   const [total, setTotal] = useState(0);
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(false);
-  const [detail, setDetail] = useState<WinnerDetail | null>(null);
 
   const load = useCallback(
     async (p: number, query: string) => {
@@ -473,13 +472,6 @@ function ParticipantsPanel({ token }: { token: string }) {
     load(page, q);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
-
-  async function showDetail(number: number) {
-    const d = await apiGet<WinnerDetail>(`panitia?op=reveal_one&number=${number}`, token).catch(
-      () => null
-    );
-    if (d) setDetail({ ...d, raffle_number: number });
-  }
 
   const pages = Math.max(1, Math.ceil(total / 25));
 
@@ -517,7 +509,6 @@ function ParticipantsPanel({ token }: { token: string }) {
               <Th>Nama</Th>
               <Th>NIK</Th>
               <Th>No HP</Th>
-              <Th> </Th>
             </tr>
           </thead>
           <tbody>
@@ -525,21 +516,13 @@ function ParticipantsPanel({ token }: { token: string }) {
               <tr key={p.raffle_number} className="border-t border-white/5">
                 <Td className="font-black text-indigo-300 tabular">{p.nomor}</Td>
                 <Td className="text-white">{p.nama}</Td>
-                <Td className="tabular text-slate-400">{p.nik_masked}</Td>
-                <Td className="tabular text-slate-400">{p.hp_masked}</Td>
-                <Td>
-                  <button
-                    onClick={() => showDetail(p.raffle_number)}
-                    className="text-xs text-indigo-300 hover:text-indigo-200 underline"
-                  >
-                    buka
-                  </button>
-                </Td>
+                <Td className="tabular text-slate-300">{p.nik}</Td>
+                <Td className="tabular text-slate-300">{p.hp}</Td>
               </tr>
             ))}
             {!items.length && (
               <tr>
-                <td colSpan={5} className="text-center text-slate-500 py-6">
+                <td colSpan={4} className="text-center text-slate-500 py-6">
                   {loading ? "Memuat…" : "Tidak ada data."}
                 </td>
               </tr>
@@ -570,31 +553,6 @@ function ParticipantsPanel({ token }: { token: string }) {
         </div>
       )}
 
-      {detail && (
-        <div
-          className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center px-4"
-          onClick={() => setDetail(null)}
-        >
-          <div
-            className="w-full max-w-sm rounded-2xl bg-[#0d1226] border border-white/10 p-5"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="text-xs uppercase tracking-widest text-indigo-300">Data Lengkap Peserta</div>
-            <div className="text-3xl font-black text-white tabular my-2">{detail.nomor}</div>
-            <div className="space-y-2 text-sm">
-              <KVRow label="Nama" value={detail.nama} />
-              <KVRow label="NIK" value={detail.nik} mono />
-              <KVRow label="No HP" value={detail.hp} mono />
-            </div>
-            <button
-              onClick={() => setDetail(null)}
-              className="mt-4 w-full rounded-lg bg-white/10 hover:bg-white/20 text-white py-2 text-sm"
-            >
-              Tutup
-            </button>
-          </div>
-        </div>
-      )}
     </Section>
   );
 }
@@ -715,12 +673,4 @@ function Th({ children }: { children: React.ReactNode }) {
 }
 function Td({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return <td className={`px-3 py-2 ${className}`}>{children}</td>;
-}
-function KVRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div className="flex justify-between gap-3">
-      <span className="text-slate-500">{label}</span>
-      <span className={`text-white ${mono ? "font-mono tabular" : ""}`}>{value}</span>
-    </div>
-  );
 }

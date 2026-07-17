@@ -12,6 +12,9 @@ import {
   cors,
   notConfigured,
   pad,
+  decrypt,
+  censorNIK,
+  censorHP,
   sbGet,
   sbCount,
   getSettings,
@@ -24,17 +27,11 @@ export default async function handler(req, res) {
   if (!CONFIGURED) return notConfigured(res);
 
   try {
-    const [settings, total, recentRows, drawRows] = await Promise.all([
+    const [settings, total, drawRows] = await Promise.all([
       getSettings(),
       sbCount("participants?raffle_number=gte.0"),
-      sbGet("participants?select=raffle_number,nama&order=created_at.desc&limit=18"),
       sbGet("draws?select=*&order=id.desc&limit=1"),
     ]);
-
-    const recent = (recentRows || []).map((p) => ({
-      nomor: pad(p.raffle_number),
-      nama: p.nama,
-    }));
 
     let draw = null;
     const d = drawRows?.[0];
@@ -42,13 +39,21 @@ export default async function handler(req, res) {
       const winnersRaw = Array.isArray(d.winners) ? d.winners : [];
       let winners = [];
       if (d.status === "revealed" && winnersRaw.length) {
-        // Ambil nama pemenang (NIK/HP tidak diikutkan ke layar publik).
+        // Ambil nama + NIK/HP pemenang; NIK & HP DISENSOR sebelum ke layar publik.
         const list = winnersRaw.join(",");
         const rows = await sbGet(
-          `participants?raffle_number=in.(${list})&select=raffle_number,nama`
+          `participants?raffle_number=in.(${list})&select=raffle_number,nama,nik_enc,hp_enc`
         );
-        const byNum = new Map((rows || []).map((r) => [r.raffle_number, r.nama]));
-        winners = winnersRaw.map((n) => ({ nomor: pad(n), nama: byNum.get(n) || "—" }));
+        const byNum = new Map((rows || []).map((r) => [r.raffle_number, r]));
+        winners = winnersRaw.map((n) => {
+          const r = byNum.get(n);
+          return {
+            nomor: pad(n),
+            nama: r?.nama || "—",
+            nik_masked: r ? censorNIK(decrypt(r.nik_enc)) : "—",
+            hp_masked: r ? censorHP(decrypt(r.hp_enc)) : "—",
+          };
+        });
       }
       draw = {
         id: d.id,
@@ -67,7 +72,6 @@ export default async function handler(req, res) {
       event_name: settings.event_name,
       registration_open: settings.registration_open,
       total,
-      recent,
       draw,
     });
   } catch (e) {
