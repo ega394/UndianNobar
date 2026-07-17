@@ -16,14 +16,19 @@
 
 import {
   CONFIGURED,
+  SECURE_CONFIG,
   cors,
   notConfigured,
+  insecureConfig,
   requireAuth,
   checkPassword,
   makeToken,
   sha256hex,
   drawWinners,
   pad,
+  rateLimit,
+  getIP,
+  allRaffleNumbers,
   sbGet,
   sbCount,
   sbInsert,
@@ -67,6 +72,7 @@ export default async function handler(req, res) {
   cors(res);
   if (req.method === "OPTIONS") return res.status(200).end();
   if (!CONFIGURED) return notConfigured(res);
+  if (!SECURE_CONFIG) return insecureConfig(res);
 
   const op = String(req.query.op || "");
   const body = req.body || {};
@@ -74,6 +80,9 @@ export default async function handler(req, res) {
   try {
     // ── Login (publik) ────────────────────────────────────────────────────────
     if (req.method === "POST" && op === "auth") {
+      // Rate limit: cegah brute force password panitia.
+      if (!rateLimit("auth:" + getIP(req), 8, 60_000))
+        return res.status(429).json({ error: "Terlalu banyak percobaan login. Coba lagi dalam 1 menit." });
       if (!checkPassword(body.password))
         return res.status(401).json({ error: "Password panitia salah." });
       return res.status(200).json({ ok: true, token: makeToken(AUTH_TTL_MS), ttl_ms: AUTH_TTL_MS });
@@ -201,8 +210,8 @@ export default async function handler(req, res) {
           });
 
         const prev = await previousWinners();
-        const all = await sbGet("participants?select=raffle_number&order=raffle_number.asc");
-        const pool = (all || []).map((p) => p.raffle_number).filter((n) => !prev.has(n));
+        const all = await allRaffleNumbers(); // paginasi penuh → tidak terpotong 1000
+        const pool = all.filter((n) => !prev.has(n));
         if (!pool.length)
           return res.status(400).json({ error: "Belum ada peserta yang berhak diundi." });
 

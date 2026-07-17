@@ -15,6 +15,8 @@ import {
   censorNIK,
   censorHP,
   pad,
+  rateLimit,
+  getIP,
   sbCount,
   sbGet,
   sbInsert,
@@ -28,6 +30,10 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
   if (!CONFIGURED) return notConfigured(res);
+
+  // Rate limit anti-spam: maks 20 pendaftaran / menit / IP.
+  if (!rateLimit("reg:" + getIP(req), 20, 60_000))
+    return res.status(429).json({ error: "Terlalu banyak permintaan. Coba lagi sebentar." });
 
   try {
     const body = req.body || {};

@@ -45,6 +45,8 @@ Salin `.env.example` → `.env` (untuk lokal) atau isi di **Vercel → Settings 
 | `PANITIA_PASSWORD`     | Password login panel panitia                                     |
 
 > `DATA_SECRET` kini hanya untuk token login panitia — mengubahnya hanya memaksa panitia login ulang, tidak memengaruhi data.
+>
+> ⚠️ **Wajib diganti dari default.** Jika `DATA_SECRET` (≥16 karakter) atau `PANITIA_PASSWORD` (≥6 karakter) masih bernilai default, panel panitia (`/api/panitia`) menolak jalan dengan pesan 503. Endpoint `/api/register` juga dibatasi **rate limit** (maks 20/menit/IP) dan login panitia (maks 8 percobaan/menit/IP) untuk mencegah spam & brute force.
 
 ### 3. Jalankan
 
