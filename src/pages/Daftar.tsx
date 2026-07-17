@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { apiPost } from "@/lib/api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { postWithRetry } from "@/lib/api";
 
 type Ticket = {
   ok: boolean;
@@ -12,30 +12,108 @@ type Ticket = {
   message?: string;
 };
 
+const DRAFT_KEY = "undian_draft";
+
 export default function Daftar() {
   const [nama, setNama] = useState("");
   const [hp, setHp] = useState("");
   const [nik, setNik] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [sendMsg, setSendMsg] = useState("");
+  const [failed, setFailed] = useState(false);
+  const [online, setOnline] = useState(typeof navigator === "undefined" ? true : navigator.onLine);
   const [ticket, setTicket] = useState<Ticket | null>(null);
 
-  async function submit(e: React.FormEvent) {
+  // Refs agar listener/callback selalu membaca nilai terbaru tanpa re-bind.
+  const fieldsRef = useRef({ nama, hp, nik });
+  fieldsRef.current = { nama, hp, nik };
+  const busyRef = useRef(false);
+  const failedRef = useRef(false);
+  failedRef.current = failed;
+  const ticketRef = useRef<Ticket | null>(null);
+  ticketRef.current = ticket;
+
+  // Muat draft (bila sebelumnya sempat mengisi lalu refresh).
+  useEffect(() => {
+    try {
+      const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null");
+      if (d && typeof d === "object") {
+        if (d.nama) setNama(d.nama);
+        if (d.hp) setHp(d.hp);
+        if (d.nik) setNik(d.nik);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  // Simpan draft tiap perubahan (supaya isian tak hilang saat jaringan lambat/refresh).
+  useEffect(() => {
+    if (ticket) return;
+    if (nama || hp || nik) localStorage.setItem(DRAFT_KEY, JSON.stringify({ nama, hp, nik }));
+  }, [nama, hp, nik, ticket]);
+
+  const doSend = useCallback(async () => {
+    if (busyRef.current || ticketRef.current) return;
+    const cur = fieldsRef.current;
+    busyRef.current = true;
+    setLoading(true);
+    setError("");
+    setFailed(false);
+    try {
+      const res = await postWithRetry<Ticket>(
+        "register",
+        { nama: cur.nama, hp: cur.hp, nik: cur.nik },
+        {
+          retries: 6,
+          timeoutMs: 12000,
+          onAttempt: (a) => setSendMsg(a === 1 ? "Mengirim…" : `Mengirim ulang… (percobaan ${a})`),
+        }
+      );
+      localStorage.removeItem(DRAFT_KEY);
+      setTicket(res);
+    } catch (e: any) {
+      if (e?.noRetry) {
+        setError(e.message || "Data tidak valid.");
+      } else {
+        setFailed(true);
+        setError(
+          navigator.onLine
+            ? "Jaringan bermasalah. Data tersimpan — tekan “Coba Lagi”."
+            : "Anda sedang offline. Data tersimpan dan akan dikirim otomatis saat koneksi kembali."
+        );
+      }
+    } finally {
+      busyRef.current = false;
+      setLoading(false);
+      setSendMsg("");
+    }
+  }, []);
+
+  // Auto-kirim ulang saat koneksi kembali.
+  useEffect(() => {
+    const onOnline = () => {
+      setOnline(true);
+      if (failedRef.current && !ticketRef.current) doSend();
+    };
+    const onOffline = () => setOnline(false);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+    };
+  }, [doSend]);
+
+  function submit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     if (!nama.trim() || !hp.trim() || nik.replace(/\D/g, "").length !== 16) {
       setError("Lengkapi semua data. NIK harus 16 digit.");
       return;
     }
-    setLoading(true);
-    try {
-      const res = await apiPost<Ticket>("register", { nama, hp, nik });
-      setTicket(res);
-    } catch (err: any) {
-      setError(err.message || "Gagal mendaftar.");
-    } finally {
-      setLoading(false);
-    }
+    doSend();
   }
 
   if (ticket) return <TicketView ticket={ticket} />;
@@ -52,6 +130,12 @@ export default function Daftar() {
             Isi data di bawah untuk mendapatkan nomor undianmu.
           </p>
         </div>
+
+        {!online && (
+          <div className="mb-3 text-sm text-amber-200 bg-amber-500/10 border border-amber-500/25 rounded-xl px-4 py-2 text-center">
+            📴 Anda sedang offline. Isian aman tersimpan; data terkirim otomatis saat koneksi kembali.
+          </div>
+        )}
 
         <form
           onSubmit={submit}
@@ -93,7 +177,13 @@ export default function Daftar() {
           </Field>
 
           {error && (
-            <div className="text-sm text-rose-300 bg-rose-500/10 border border-rose-500/20 rounded-lg px-3 py-2">
+            <div
+              className={`text-sm rounded-lg px-3 py-2 border ${
+                failed
+                  ? "text-amber-200 bg-amber-500/10 border-amber-500/25"
+                  : "text-rose-300 bg-rose-500/10 border-rose-500/20"
+              }`}
+            >
               {error}
             </div>
           )}
@@ -101,13 +191,16 @@ export default function Daftar() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-xl bg-indigo-500 hover:bg-indigo-400 disabled:opacity-60 text-white font-semibold py-3 transition shadow-lg shadow-indigo-500/30"
+            className="w-full rounded-xl bg-indigo-500 hover:bg-indigo-400 disabled:opacity-70 text-white font-semibold py-3 transition shadow-lg shadow-indigo-500/30 flex items-center justify-center gap-2"
           >
-            {loading ? "Memproses…" : "Ambil Nomor Undian"}
+            {loading && (
+              <span className="inline-block w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+            )}
+            {loading ? sendMsg || "Mengirim…" : failed ? "Coba Lagi" : "Ambil Nomor Undian"}
           </button>
 
           <p className="text-[11px] leading-relaxed text-slate-500 text-center">
-            Data NIK & No HP disimpan terenkripsi, disensor di layar publik, dan dihapus setelah acara.
+            Data NIK & No HP disensor di layar publik dan dihapus setelah acara.
           </p>
         </form>
       </div>
@@ -183,9 +276,7 @@ function TicketView({ ticket }: { ticket: Ticket }) {
             </div>
 
             <div className="mt-6 border-t border-dashed border-white/15 pt-4">
-              <p className="text-sm font-semibold text-amber-300">
-                📸 Screenshot halaman ini
-              </p>
+              <p className="text-sm font-semibold text-amber-300">📸 Screenshot halaman ini</p>
               <p className="text-[12px] text-slate-400 mt-1">
                 Simpan sebagai bukti. Tunjukkan nomor ini saat pengundian.
               </p>
