@@ -20,7 +20,6 @@ type ScreenData = {
   draw: Draw | null;
 };
 
-const LAST_ANIM_KEY = "undian_last_anim";
 const POLL_MS = 2500;
 const DRAW_ANIM_MS = 15000;
 
@@ -30,9 +29,11 @@ export default function Layar() {
   const [data, setData] = useState<ScreenData | null>(null);
   const [err, setErr] = useState("");
   const [phase, setPhase] = useState<Phase>("normal");
-  const [handledId, setHandledId] = useState<number | null>(null);
-  const dataRef = useRef<ScreenData | null>(null);
-  dataRef.current = data;
+
+  const phaseRef = useRef<Phase>("normal");
+  phaseRef.current = phase;
+  const initedRef = useRef(false);
+  const seenRevealedIdRef = useRef<number | null>(null); // id undian revealed yg sudah ditampilkan
 
   // Polling data layar
   useEffect(() => {
@@ -56,29 +57,37 @@ export default function Layar() {
     };
   }, []);
 
-  // Tentukan fase tampilan (normal / animasi undi / pengumuman pemenang)
+  // Tentukan fase tampilan. Animasi diputar untuk penarikan BARU yang terjadi
+  // selagi layar terbuka (tidak bergantung parsing waktu server).
   useEffect(() => {
-    const d = data?.draw;
-    if (!d || d.status !== "revealed") {
-      if (phase !== "drawing") setPhase("normal");
+    if (!data) return; // tunggu data nyata pertama
+    const d = data.draw;
+    const revealedId = d && d.status === "revealed" ? d.id : null;
+
+    // Muatan pertama: catat kondisi awal tanpa animasi (jangan putar ulang reveal lama).
+    if (!initedRef.current) {
+      initedRef.current = true;
+      seenRevealedIdRef.current = revealedId;
+      setPhase(revealedId != null ? "reveal" : "normal");
       return;
     }
-    if (d.id === handledId) return; // reveal ini sudah ditangani
-    setHandledId(d.id);
 
-    const lastAnim = localStorage.getItem(LAST_ANIM_KEY);
-    const fresh = d.revealed_at ? Date.now() - Date.parse(d.revealed_at) < 60000 : false;
-    if (lastAnim === String(d.id) || !fresh) {
-      setPhase("reveal"); // sudah pernah dianimasikan / reveal lama → langsung tampil
-    } else {
-      setPhase("drawing"); // reveal baru → mainkan animasi 15 detik
+    if (revealedId == null) {
+      if (phaseRef.current !== "drawing") setPhase("normal");
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    if (revealedId === seenRevealedIdRef.current) {
+      if (phaseRef.current === "normal") setPhase("reveal");
+      return; // sudah/ sedang ditangani
+    }
+
+    // Penarikan baru terdeteksi → mainkan animasi 15 detik lalu tampilkan pemenang.
+    seenRevealedIdRef.current = revealedId;
+    setPhase("drawing");
   }, [data]);
 
   function finishDrawing() {
-    const d = dataRef.current?.draw;
-    if (d) localStorage.setItem(LAST_ANIM_KEY, String(d.id));
     setPhase("reveal");
   }
 
