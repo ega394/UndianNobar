@@ -12,8 +12,6 @@ import {
   notConfigured,
   validateNIK,
   validatePhone,
-  hmac,
-  encrypt,
   censorNIK,
   censorHP,
   pad,
@@ -52,13 +50,9 @@ export default async function handler(req, res) {
 
     const nik = nikCheck.nik;
     const hp = hpCheck.hp;
-    const nik_hash = hmac("nik:" + nik);
-    const hp_hash = hmac("hp:" + hp);
 
     // ── Anti-dobel: NIK sudah terdaftar? kembalikan nomor yang sudah ada ──────
-    const existing = await sbGet(
-      `participants?nik_hash=eq.${nik_hash}&select=raffle_number,nama`
-    );
+    const existing = await sbGet(`participants?nik=eq.${nik}&select=raffle_number,nama`);
     if (existing?.length) {
       const p = existing[0];
       return res.status(200).json({
@@ -75,28 +69,19 @@ export default async function handler(req, res) {
     }
 
     // ── Batas maksimal 3 pendaftaran per nomor HP ────────────────────────────
-    const phoneCount = await sbCount(`participants?hp_hash=eq.${hp_hash}`);
+    const phoneCount = await sbCount(`participants?hp=eq.${hp}`);
     if (phoneCount >= MAX_PER_PHONE)
       return res.status(409).json({
         error: `No HP ini sudah dipakai untuk ${MAX_PER_PHONE} pendaftaran (batas maksimal). Gunakan No HP lain.`,
       });
 
-    // ── Simpan (NIK & HP terenkripsi) ────────────────────────────────────────
-    const ins = await sbInsert("participants", {
-      nama,
-      nik_hash,
-      nik_enc: encrypt(nik),
-      hp_hash,
-      hp_enc: encrypt(hp),
-      gender: nikCheck.gender,
-    });
+    // ── Simpan ────────────────────────────────────────────────────────────────
+    const ins = await sbInsert("participants", { nama, nik, hp, gender: nikCheck.gender });
 
     // Tangani balapan (dua request NIK sama nyaris bersamaan) → 409 unique.
     if (!ins.ok) {
       if (ins.status === 409) {
-        const again = await sbGet(
-          `participants?nik_hash=eq.${nik_hash}&select=raffle_number,nama`
-        );
+        const again = await sbGet(`participants?nik=eq.${nik}&select=raffle_number,nama`);
         if (again?.length) {
           const p = again[0];
           return res.status(200).json({

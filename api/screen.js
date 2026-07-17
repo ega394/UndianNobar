@@ -12,7 +12,6 @@ import {
   cors,
   notConfigured,
   pad,
-  decrypt,
   censorNIK,
   censorHP,
   sbGet,
@@ -42,7 +41,7 @@ export default async function handler(req, res) {
         // Ambil nama + NIK/HP pemenang; NIK & HP DISENSOR sebelum ke layar publik.
         const list = winnersRaw.join(",");
         const rows = await sbGet(
-          `participants?raffle_number=in.(${list})&select=raffle_number,nama,nik_enc,hp_enc`
+          `participants?raffle_number=in.(${list})&select=raffle_number,nama,nik,hp`
         );
         const byNum = new Map((rows || []).map((r) => [r.raffle_number, r]));
         winners = winnersRaw.map((n) => {
@@ -50,13 +49,14 @@ export default async function handler(req, res) {
           return {
             nomor: pad(n),
             nama: r?.nama || "—",
-            nik_masked: r ? censorNIK(decrypt(r.nik_enc)) : "—",
-            hp_masked: r ? censorHP(decrypt(r.hp_enc)) : "—",
+            nik_masked: r ? censorNIK(r.nik) : "—",
+            hp_masked: r ? censorHP(r.hp) : "—",
           };
         });
       }
       draw = {
         id: d.id,
+        prize: d.prize || null,
         status: d.status,
         seed_hash: d.seed_hash,
         seed: d.status === "revealed" ? d.seed : null,
