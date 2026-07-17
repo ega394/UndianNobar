@@ -24,8 +24,6 @@ import {
   sha256hex,
   drawWinners,
   decrypt,
-  censorNIK,
-  censorHP,
   pad,
   sbGet,
   sbCount,
@@ -146,8 +144,8 @@ export default async function handler(req, res) {
           raffle_number: r.raffle_number,
           nama: r.nama,
           gender: r.gender,
-          nik_masked: censorNIK(decrypt(r.nik_enc)),
-          hp_masked: censorHP(decrypt(r.hp_enc)),
+          nik: decrypt(r.nik_enc) || "—",
+          hp: decrypt(r.hp_enc) || "—",
           created_at: r.created_at,
         }));
         return res.status(200).json({ items, page, size, total: totalMatched, hasMore: to + 1 < totalMatched });

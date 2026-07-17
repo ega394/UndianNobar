@@ -5,14 +5,13 @@ type ScreenData = {
   event_name: string;
   registration_open: boolean;
   total: number;
-  recent: { nomor: string; nama: string }[];
   draw: null | {
     status: "committed" | "revealed";
     seed_hash: string;
     seed: string | null;
     n_winners: number;
     pool_size: number;
-    winners: { nomor: string; nama: string }[];
+    winners: { nomor: string; nama: string; nik_masked: string; hp_masked: string }[];
   };
 };
 
@@ -77,17 +76,17 @@ export default function Layar() {
       {revealed && draw ? (
         <WinnersStage draw={draw} eventTotal={data?.total || 0} />
       ) : (
-        <main className="flex-1 grid lg:grid-cols-[1.1fr_1fr] gap-6 mt-6">
+        <main className="flex-1 flex mt-6">
           {/* Counter */}
-          <section className="rounded-3xl bg-white/[0.04] border border-white/10 p-8 flex flex-col items-center justify-center text-center">
+          <section className="flex-1 rounded-3xl bg-white/[0.04] border border-white/10 p-8 flex flex-col items-center justify-center text-center">
             <div className="text-sm uppercase tracking-widest text-slate-400">Total Pendaftar</div>
-            <div className="text-[22vw] lg:text-[12rem] leading-none font-black text-white tabular my-2">
+            <div className="text-[30vw] lg:text-[16rem] leading-none font-black text-white tabular my-4">
               {data ? data.total : "—"}
             </div>
-            <div className="text-slate-400">peserta sudah dapat nomor undian</div>
+            <div className="text-slate-400 text-lg">peserta sudah dapat nomor undian</div>
 
             {draw?.status === "committed" && (
-              <div className="mt-6 w-full max-w-md rounded-2xl bg-amber-500/10 border border-amber-500/25 p-4">
+              <div className="mt-8 w-full max-w-lg rounded-2xl bg-amber-500/10 border border-amber-500/25 p-4">
                 <div className="text-amber-300 font-semibold">🔒 Undian Dikunci</div>
                 <div className="text-sm text-slate-300 mt-1">
                   {draw.n_winners} pemenang akan ditarik dari {draw.pool_size} peserta.
@@ -98,27 +97,6 @@ export default function Layar() {
                 </div>
               </div>
             )}
-          </section>
-
-          {/* Feed pendaftar terbaru */}
-          <section className="rounded-3xl bg-white/[0.04] border border-white/10 p-6 overflow-hidden">
-            <div className="text-sm uppercase tracking-widest text-slate-400 mb-3">
-              Pendaftar Terbaru
-            </div>
-            <ul className="space-y-2">
-              {(data?.recent || []).slice(0, 12).map((p) => (
-                <li
-                  key={p.nomor}
-                  className="flex items-center gap-3 rounded-xl bg-white/[0.03] px-3 py-2 animate-fade-up"
-                >
-                  <span className="text-lg font-black text-indigo-300 tabular w-16">{p.nomor}</span>
-                  <span className="text-white font-medium truncate">{p.nama}</span>
-                </li>
-              ))}
-              {!data?.recent?.length && (
-                <li className="text-slate-500 text-sm">Belum ada pendaftar.</li>
-              )}
-            </ul>
           </section>
         </main>
       )}
@@ -164,6 +142,14 @@ function WinnersStage({
             <div className="rounded-[calc(1rem-2px)] bg-[#0d1226] px-5 py-6 text-center">
               <div className="text-5xl font-black text-white tabular">{w.nomor}</div>
               <div className="mt-2 text-lg font-bold text-white truncate">{w.nama}</div>
+              <div className="mt-3 pt-3 border-t border-white/10 space-y-1 text-slate-400">
+                <div className="text-xs">
+                  NIK <span className="tabular text-slate-300">{w.nik_masked}</span>
+                </div>
+                <div className="text-xs">
+                  HP <span className="tabular text-slate-300">{w.hp_masked}</span>
+                </div>
+              </div>
             </div>
           </div>
         ))}
