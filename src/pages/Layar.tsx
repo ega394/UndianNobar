@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { apiGet } from "@/lib/api";
+import QRCode from "qrcode";
+import { apiGet, apiPost } from "@/lib/api";
+
+const PANITIA_TOKEN_KEY = "undian_panitia_token";
 
 type Winner = { nomor: string; nama: string; nik_masked: string; hp_masked: string };
 type Draw = {
@@ -16,7 +19,9 @@ type Draw = {
 type ScreenData = {
   event_name: string;
   registration_open: boolean;
+  checkin_open: boolean;
   total: number;
+  hadir: number;
   draw: Draw | null;
 };
 
@@ -110,7 +115,12 @@ export default function Layar() {
         ) : phase === "reveal" && draw && draw.winners.length ? (
           <WinnersStage draw={draw} total={data?.total || 0} />
         ) : (
-          <IdleStage total={data?.total ?? null} draw={draw} />
+          <IdleStage
+            total={data?.total ?? null}
+            hadir={data?.hadir ?? null}
+            checkinOpen={!!data?.checkin_open}
+            draw={draw}
+          />
         )}
       </main>
 
@@ -185,36 +195,62 @@ function Ticker() {
 }
 
 /* ── Tampilan diam: counter + status doorprize berikutnya ─────────────────── */
-function IdleStage({ total, draw }: { total: number | null; draw: Draw | null }) {
+const GOLD_TEXT: React.CSSProperties = {
+  backgroundImage: "linear-gradient(120deg,#ffe082,#ffc72c,#ff9e00,#ffc72c,#ffe082)",
+  backgroundSize: "200% auto",
+  WebkitBackgroundClip: "text",
+  backgroundClip: "text",
+  color: "transparent",
+  animation: "shine 5s linear infinite",
+};
+
+function IdleStage({
+  total,
+  hadir,
+  checkinOpen,
+  draw,
+}: {
+  total: number | null;
+  hadir: number | null;
+  checkinOpen: boolean;
+  draw: Draw | null;
+}) {
   const committed = draw?.status === "committed";
+
+  // Saat check-in dibuka & belum ada undian dikunci → kode check-in jadi fokus.
+  if (checkinOpen && !committed) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center gap-5 mt-2">
+        <div className="text-center">
+          <span className="text-amber-300/90 text-sm uppercase tracking-[0.3em] font-semibold">Hadir</span>
+          <span className="text-5xl sm:text-6xl font-black tabular mx-3" style={GOLD_TEXT}>
+            {hadir ?? "—"}
+          </span>
+          <span className="text-slate-400 text-lg">/ {total ?? "—"} pendaftar</span>
+        </div>
+        <CheckinCode />
+      </div>
+    );
+  }
+
   return (
     <div className="flex-1 flex flex-col items-center justify-center text-center gap-6 mt-2">
       <div>
-        <div className="text-sm uppercase tracking-[0.3em] text-amber-300/90 font-semibold">Total Pendaftar</div>
-        <div
-          className="text-[26vw] lg:text-[15rem] leading-none font-black tabular my-2"
-          style={{
-            backgroundImage: "linear-gradient(120deg,#ffe082,#ffc72c,#ff9e00,#ffc72c,#ffe082)",
-            backgroundSize: "200% auto",
-            WebkitBackgroundClip: "text",
-            backgroundClip: "text",
-            color: "transparent",
-            animation: "shine 5s linear infinite",
-          }}
-        >
-          {total ?? "—"}
+        <div className="text-sm uppercase tracking-[0.3em] text-amber-300/90 font-semibold">
+          Hadir (siap diundi)
         </div>
-        <div className="text-slate-300 text-lg">peserta sudah dapat nomor undian</div>
+        <div className="text-[26vw] lg:text-[15rem] leading-none font-black tabular my-2" style={GOLD_TEXT}>
+          {hadir ?? "—"}
+        </div>
+        <div className="text-slate-300 text-lg">dari {total ?? "—"} pendaftar yang check-in</div>
       </div>
 
       {committed && draw && (
         <div className="w-full max-w-3xl rounded-2xl bg-[#0a1c5c]/70 border-2 border-amber-400/50 p-5 animate-pulse">
           <div className="text-amber-300 font-black text-2xl">🎁 SIAP DIUNDI</div>
-          {draw.prize && (
-            <div className="text-3xl sm:text-4xl font-black text-white mt-1">{draw.prize}</div>
-          )}
+          {draw.prize && <div className="text-3xl sm:text-4xl font-black text-white mt-1">{draw.prize}</div>}
           <div className="text-slate-300 mt-2">
-            {draw.n_winners} pemenang akan diundi dari {draw.pool_size} peserta
+            {draw.n_winners} pemenang akan diundi dari {draw.pool_size} peserta hadir
           </div>
           <div className="mt-2 text-[10px] text-slate-400">Kode komitmen (SHA-256):</div>
           <div className="font-mono text-[10px] break-all text-amber-200/80">{draw.seed_hash}</div>
@@ -222,10 +258,126 @@ function IdleStage({ total, draw }: { total: number | null; draw: Draw | null })
       )}
 
       {!committed && (
-        <div className="text-2xl sm:text-3xl font-black text-amber-300" style={{ animation: "floaty 4s ease-in-out infinite" }}>
+        <div
+          className="text-2xl sm:text-3xl font-black text-amber-300"
+          style={{ animation: "floaty 4s ease-in-out infinite" }}
+        >
           ⚽ Banjir DOORPRIZE ⚽
         </div>
       )}
+    </div>
+  );
+}
+
+/* ── Kode check-in berputar (hanya tampil bila panitia login di layar ini) ─── */
+function CheckinCode() {
+  const [token, setToken] = useState(() => localStorage.getItem(PANITIA_TOKEN_KEY) || "");
+  const [info, setInfo] = useState<{ code: string; seconds: number; period: number } | null>(null);
+  const [qr, setQr] = useState("");
+  const [pw, setPw] = useState("");
+  const [err, setErr] = useState("");
+  const secRef = useRef(0);
+  const codeRef = useRef("");
+
+  useEffect(() => {
+    if (!token) return;
+    let alive = true;
+    async function fetchCode() {
+      try {
+        const r = await apiGet<{ code: string; period: number; seconds_remaining: number }>(
+          "checkin?op=code",
+          token
+        );
+        if (!alive) return;
+        secRef.current = r.seconds_remaining;
+        setInfo({ code: r.code, seconds: r.seconds_remaining, period: r.period });
+        if (r.code !== codeRef.current) {
+          codeRef.current = r.code;
+          QRCode.toDataURL(`${location.origin}/checkin?c=${r.code}`, { width: 360, margin: 1 })
+            .then((d) => alive && setQr(d))
+            .catch(() => {});
+        }
+      } catch (e: any) {
+        if (!alive) return;
+        if (String(e?.message || "").includes("Sesi")) {
+          localStorage.removeItem(PANITIA_TOKEN_KEY);
+          setToken("");
+        }
+      }
+    }
+    fetchCode();
+    const poll = window.setInterval(fetchCode, 3000);
+    const tick = window.setInterval(() => {
+      secRef.current = Math.max(0, secRef.current - 1);
+      setInfo((i) => (i ? { ...i, seconds: secRef.current } : i));
+    }, 1000);
+    return () => {
+      alive = false;
+      clearInterval(poll);
+      clearInterval(tick);
+    };
+  }, [token]);
+
+  async function login(e: React.FormEvent) {
+    e.preventDefault();
+    setErr("");
+    try {
+      const r = await apiPost<{ token: string }>("panitia?op=auth", { password: pw });
+      localStorage.setItem(PANITIA_TOKEN_KEY, r.token);
+      setToken(r.token);
+      setPw("");
+    } catch (e: any) {
+      setErr(e?.message || "Gagal masuk.");
+    }
+  }
+
+  if (!token) {
+    return (
+      <form onSubmit={login} className="w-full max-w-md rounded-2xl bg-white/[0.04] border border-white/10 p-4 text-center">
+        <div className="text-slate-300 text-sm mb-2">🔒 Masuk panitia untuk menampilkan kode check-in di layar ini</div>
+        <div className="flex gap-2">
+          <input
+            type="password"
+            value={pw}
+            onChange={(e) => setPw(e.target.value)}
+            placeholder="Password panitia"
+            className="flex-1 rounded-lg bg-white/5 border border-white/15 px-3 py-2 text-white outline-none focus:border-amber-400"
+          />
+          <button className="rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-semibold px-4 py-2 text-sm">
+            Masuk
+          </button>
+        </div>
+        {err && <div className="text-rose-300 text-xs mt-2">{err}</div>}
+      </form>
+    );
+  }
+
+  return (
+    <div className="w-full max-w-4xl rounded-3xl bg-[#0a1c5c]/70 border-2 border-amber-400/60 p-6">
+      <div className="text-center text-amber-300 font-black text-lg sm:text-2xl uppercase tracking-wide">
+        📍 Check-in di sini agar nomormu ikut diundi
+      </div>
+      <div className="mt-4 grid sm:grid-cols-[1fr_auto] gap-6 items-center">
+        <div className="text-center">
+          <div className="text-slate-300 text-sm">Buka /checkin di HP, ketik kode ini:</div>
+          <div className="text-7xl sm:text-9xl font-black tabular text-white tracking-[0.12em] leading-none my-3">
+            {info?.code || "······"}
+          </div>
+          <div className="h-2.5 rounded-full bg-white/10 overflow-hidden max-w-md mx-auto">
+            <div
+              className="h-full bg-gradient-to-r from-amber-400 to-amber-200 transition-all duration-1000 ease-linear"
+              style={{ width: `${info ? (info.seconds / info.period) * 100 : 0}%` }}
+            />
+          </div>
+          <div className="text-xs text-slate-400 mt-1">berganti dalam {info?.seconds ?? "—"} detik</div>
+        </div>
+        {qr && (
+          <div className="text-center">
+            <img src={qr} alt="QR check-in" className="w-40 h-40 sm:w-56 sm:h-56 rounded-xl bg-white p-2 mx-auto" />
+            <div className="text-xs text-slate-400 mt-1">atau scan QR ini</div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

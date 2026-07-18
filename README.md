@@ -15,8 +15,20 @@ Aplikasi undian untuk acara **nonton bareng**. Penonton scan QR → isi **Nama, 
 | Rute        | Untuk        | Fungsi                                                             |
 | ----------- | ------------ | ----------------------------------------------------------------- |
 | `/daftar`   | Penonton     | Form pendaftaran → kartu nomor undian untuk di-screenshot         |
-| `/panitia`  | Panitia      | Login, statistik, kunci & tarik undian, tabel peserta, QR, hapus data |
-| `/layar`    | Proyektor    | Counter pendaftar langsung + pengumuman pemenang (data tersensor) |
+| `/checkin`  | Penonton     | Konfirmasi kehadiran di lokasi (NIK + kode dari layar)            |
+| `/panitia`  | Panitia      | Login, statistik, buka/tutup check-in, kunci & tarik undian, tabel peserta, QR, hapus data |
+| `/layar`    | Proyektor    | Counter Hadir + kode check-in berputar + pengumuman pemenang      |
+
+## Check-in kehadiran (hanya yang hadir yang diundi)
+
+Agar nomor yang tidak hadir tidak ikut diundi, ada langkah **check-in di lokasi**:
+
+1. Panitia menekan **Buka Check-in** di `/panitia`.
+2. `/layar` (setelah panitia login di perangkat proyektor) menampilkan **kode 6 digit + QR yang berganti tiap 45 detik**. Kode dihitung dari `DATA_SECRET` + waktu (ala TOTP) dan **hanya bisa dilihat lewat layar** (endpoint kode butuh login panitia) — jadi peserta harus benar-benar hadir.
+3. Peserta buka `/checkin`, isi **NIK + kode yang tampil di layar** (atau scan QR-nya) → status jadi **HADIR**.
+4. Saat mengundi, **pool hanya berisi peserta yang HADIR**. Yang tidak check-in tidak akan pernah ditarik.
+
+> Catatan: kode bisa "dititipkan" via chat oleh yang di dalam ke yang di luar — diperkecil dengan rotasi cepat (45 dtk) & 1 NIK sekali check-in. Untuk anti-titip mutlak, gabungkan dengan scan tiket di gerbang oleh petugas.
 
 ## Tech stack
 

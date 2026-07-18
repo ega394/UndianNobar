@@ -97,11 +97,12 @@ export default async function handler(req, res) {
       if (op === "session") return res.status(200).json({ ok: true });
 
       if (op === "stats") {
-        const [settings, total, male, female, draws] = await Promise.all([
+        const [settings, total, male, female, hadir, draws] = await Promise.all([
           getSettings(),
           sbCount("participants?raffle_number=gte.0"),
           sbCount("participants?gender=eq.L"),
           sbCount("participants?gender=eq.P"),
+          sbCount("participants?hadir=is.true"),
           sbGet("draws?select=id,prize,seed_hash,n_winners,pool,winners,status,committed_at,revealed_at&order=id.desc"),
         ]);
         const drawList = (draws || []).map((d) => ({
@@ -118,7 +119,9 @@ export default async function handler(req, res) {
         return res.status(200).json({
           event_name: settings.event_name,
           registration_open: settings.registration_open,
+          checkin_open: settings.checkin_open,
           total,
+          hadir,
           gender: { L: male, P: female },
           draws: drawList,
         });
@@ -210,10 +213,13 @@ export default async function handler(req, res) {
           });
 
         const prev = await previousWinners();
-        const all = await allRaffleNumbers(); // paginasi penuh → tidak terpotong 1000
+        // Hanya peserta yang HADIR (sudah check-in) yang masuk pool undian.
+        const all = await allRaffleNumbers({ presentOnly: true });
         const pool = all.filter((n) => !prev.has(n));
         if (!pool.length)
-          return res.status(400).json({ error: "Belum ada peserta yang berhak diundi." });
+          return res.status(400).json({
+            error: "Belum ada peserta HADIR yang berhak diundi. Pastikan check-in sudah dibuka & ada yang check-in.",
+          });
 
         let n = parseInt(String(body.n_winners), 10);
         if (!Number.isFinite(n) || n < 1) n = 1;
@@ -294,6 +300,15 @@ export default async function handler(req, res) {
           updated_at: new Date().toISOString(),
         });
         return res.status(200).json({ ok: true, registration_open: open });
+      }
+
+      if (op === "toggle_checkin") {
+        const open = Boolean(body.open);
+        await sbPatch("settings?id=eq.1", {
+          checkin_open: open,
+          updated_at: new Date().toISOString(),
+        });
+        return res.status(200).json({ ok: true, checkin_open: open });
       }
 
       if (op === "purge") {

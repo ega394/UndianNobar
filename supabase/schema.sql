@@ -13,11 +13,18 @@ create table if not exists participants (
   nik           text        not null unique,
   hp            text        not null,
   gender        text,
+  hadir         boolean     not null default false,   -- true setelah check-in di lokasi
+  checked_in_at timestamptz,
   created_at    timestamptz not null default now()
 );
 
 create index if not exists idx_participants_hp      on participants (hp);
 create index if not exists idx_participants_created on participants (created_at);
+create index if not exists idx_participants_hadir   on participants (hadir);
+
+-- Bila tabel participants sudah terlanjur dibuat tanpa kolom kehadiran, jalankan:
+alter table participants add column if not exists hadir boolean not null default false;
+alter table participants add column if not exists checked_in_at timestamptz;
 
 -- Sesi pengundian (commit-reveal, agar hasil bisa diaudit).
 --  * seed_hash  : SHA-256 dari seed — ditampilkan SEBELUM penarikan (komitmen)
@@ -45,11 +52,15 @@ create table if not exists settings (
   id                int primary key default 1,
   event_name        text        not null default 'Nonton Bareng',
   registration_open boolean     not null default true,
+  checkin_open      boolean     not null default false,   -- buka/tutup check-in di lokasi
   updated_at        timestamptz not null default now(),
   constraint settings_singleton check (id = 1)
 );
 
 insert into settings (id) values (1) on conflict (id) do nothing;
+
+-- Bila tabel settings sudah ada tanpa kolom checkin_open, jalankan:
+alter table settings add column if not exists checkin_open boolean not null default false;
 
 -- ============================================================================
 --  Keamanan Row Level Security
