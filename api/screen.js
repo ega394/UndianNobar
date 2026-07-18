@@ -26,9 +26,10 @@ export default async function handler(req, res) {
   if (!CONFIGURED) return notConfigured(res);
 
   try {
-    const [settings, total, drawRows] = await Promise.all([
+    const [settings, total, hadir, drawRows] = await Promise.all([
       getSettings(),
       sbCount("participants?raffle_number=gte.0"),
+      sbCount("participants?hadir=is.true"),
       sbGet("draws?select=*&order=id.desc&limit=1"),
     ]);
 
@@ -71,7 +72,9 @@ export default async function handler(req, res) {
     return res.status(200).json({
       event_name: settings.event_name,
       registration_open: settings.registration_open,
+      checkin_open: settings.checkin_open,
       total,
+      hadir,
       draw,
     });
   } catch (e) {

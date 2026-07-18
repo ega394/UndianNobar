@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import "./index.css";
 import Daftar from "./pages/Daftar";
+import Checkin from "./pages/Checkin";
 import Panitia from "./pages/Panitia";
 import Layar from "./pages/Layar";
 import NotFound from "./pages/NotFound";
@@ -13,6 +14,7 @@ createRoot(document.getElementById("root")!).render(
       <Routes>
         <Route path="/" element={<Daftar />} />
         <Route path="/daftar" element={<Daftar />} />
+        <Route path="/checkin" element={<Checkin />} />
         <Route path="/panitia" element={<Panitia />} />
         <Route path="/layar" element={<Layar />} />
         <Route path="*" element={<NotFound />} />

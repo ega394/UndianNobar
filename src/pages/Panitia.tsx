@@ -19,7 +19,9 @@ type Draw = {
 type Stats = {
   event_name: string;
   registration_open: boolean;
+  checkin_open: boolean;
   total: number;
+  hadir: number;
   gender: { L: number; P: number };
   draws: Draw[];
 };
@@ -176,8 +178,9 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
       )}
 
       {/* Statistik */}
-      <div className="grid grid-cols-3 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         <Stat label="Total Pendaftar" value={stats?.total ?? "—"} />
+        <Stat label="Hadir (diundi)" value={stats?.hadir ?? "—"} highlight />
         <Stat label="Laki-laki" value={stats?.gender.L ?? "—"} />
         <Stat label="Perempuan" value={stats?.gender.P ?? "—"} />
       </div>
@@ -195,10 +198,24 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
   );
 }
 
-function Stat({ label, value }: { label: string; value: number | string }) {
+function Stat({
+  label,
+  value,
+  highlight,
+}: {
+  label: string;
+  value: number | string;
+  highlight?: boolean;
+}) {
   return (
-    <div className="rounded-2xl bg-white/[0.04] border border-white/10 p-4 text-center">
-      <div className="text-2xl sm:text-3xl font-black text-white tabular">{value}</div>
+    <div
+      className={`rounded-2xl border p-4 text-center ${
+        highlight ? "bg-amber-500/10 border-amber-400/40" : "bg-white/[0.04] border-white/10"
+      }`}
+    >
+      <div className={`text-2xl sm:text-3xl font-black tabular ${highlight ? "text-amber-300" : "text-white"}`}>
+        {value}
+      </div>
       <div className="text-[11px] uppercase tracking-wider text-slate-400 mt-1">{label}</div>
     </div>
   );
@@ -222,6 +239,7 @@ function EventControls({
   }, [stats]);
 
   const open = stats?.registration_open;
+  const checkinOpen = stats?.checkin_open;
 
   return (
     <Section title="Pengaturan Acara">
@@ -241,17 +259,32 @@ function EventControls({
         >
           Simpan Nama
         </button>
+      </div>
+
+      <div className="flex flex-wrap gap-3 mt-3">
         <button
           disabled={busy}
-          onClick={() =>
-            action(() => apiPost("panitia?op=toggle_registration", { open: !open }, token))
-          }
+          onClick={() => action(() => apiPost("panitia?op=toggle_registration", { open: !open }, token))}
           className={`rounded-lg px-4 py-2 text-sm font-semibold ${
             open ? "bg-rose-500/80 hover:bg-rose-500 text-white" : "bg-emerald-500/80 hover:bg-emerald-500 text-white"
           }`}
         >
           {open ? "Tutup Pendaftaran" : "Buka Pendaftaran"}
         </button>
+        <button
+          disabled={busy}
+          onClick={() => action(() => apiPost("panitia?op=toggle_checkin", { open: !checkinOpen }, token))}
+          className={`rounded-lg px-4 py-2 text-sm font-semibold ${
+            checkinOpen ? "bg-rose-500/80 hover:bg-rose-500 text-white" : "bg-emerald-500/80 hover:bg-emerald-500 text-white"
+          }`}
+        >
+          {checkinOpen ? "Tutup Check-in" : "Buka Check-in"}
+        </button>
+        <div className="flex items-center text-xs text-slate-400">
+          Check-in: <b className={`ml-1 ${checkinOpen ? "text-emerald-300" : "text-slate-300"}`}>
+            {checkinOpen ? "DIBUKA" : "ditutup"}
+          </b>
+        </div>
       </div>
     </Section>
   );

@@ -34,6 +34,31 @@ export function hmac(s) {
   return createHmac("sha256", MAC_KEY).update(String(s)).digest("hex");
 }
 
+// ── Kode check-in berputar (ala TOTP) ───────────────────────────────────────
+// Kode dihitung deterministik dari DATA_SECRET + jendela waktu, jadi tiap
+// instance serverless menghasilkan kode sama tanpa state bersama. Hanya tampil
+// di layar venue (endpoint kode butuh login panitia), jadi harus hadir untuk tahu.
+export const CHECKIN_PERIOD = 45; // detik per rotasi
+
+function checkinCodeFor(windowIndex) {
+  const h = createHmac("sha256", "checkin:" + DATA_SECRET).update(String(windowIndex)).digest("hex");
+  const n = parseInt(h.slice(0, 8), 16) % 1000000;
+  return String(n).padStart(6, "0");
+}
+export function currentCheckin() {
+  const now = Math.floor(Date.now() / 1000);
+  const windowIndex = Math.floor(now / CHECKIN_PERIOD);
+  const secondsRemaining = CHECKIN_PERIOD - (now % CHECKIN_PERIOD);
+  return { code: checkinCodeFor(windowIndex), period: CHECKIN_PERIOD, secondsRemaining, windowIndex };
+}
+// Terima kode jendela SEKARANG atau SEBELUMNYA (toleransi saat rotasi/mengetik).
+export function verifyCheckinCode(code) {
+  const c = String(code || "").replace(/\D/g, "");
+  if (c.length !== 6) return false;
+  const w = Math.floor(Date.now() / 1000 / CHECKIN_PERIOD);
+  return c === checkinCodeFor(w) || c === checkinCodeFor(w - 1);
+}
+
 // ── Klien Supabase (REST / PostgREST) ───────────────────────────────────────
 const H = (extra = {}) => ({
   "Content-Type": "application/json",
@@ -243,15 +268,17 @@ export function rateLimit(key, max, windowMs) {
 
 // Ambil SELURUH raffle_number peserta dgn keyset pagination (lewati batas
 // default PostgREST yang bisa memotong hasil di ~1000 baris).
-export async function allRaffleNumbers() {
+// presentOnly=true → hanya peserta yang sudah check-in (hadir).
+export async function allRaffleNumbers({ presentOnly = false } = {}) {
   const out = [];
   const PAGE = 1000;
   let last = -1;
+  const extra = presentOnly ? "&hadir=is.true" : "";
   // Loop sampai halaman kosong — aman walau server membatasi baris per request.
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const rows = await sbGet(
-      `participants?select=raffle_number&raffle_number=gt.${last}&order=raffle_number.asc&limit=${PAGE}`
+      `participants?select=raffle_number&raffle_number=gt.${last}${extra}&order=raffle_number.asc&limit=${PAGE}`
     );
     if (!rows.length) break;
     for (const r of rows) out.push(r.raffle_number);
@@ -260,8 +287,12 @@ export async function allRaffleNumbers() {
   return out;
 }
 export function getSettings() {
-  return sbGet("settings?id=eq.1&select=event_name,registration_open").then((r) => r?.[0] || {
-    event_name: "Nonton Bareng",
-    registration_open: true,
-  });
+  return sbGet("settings?id=eq.1&select=event_name,registration_open,checkin_open").then(
+    (r) =>
+      r?.[0] || {
+        event_name: "Nonton Bareng",
+        registration_open: true,
+        checkin_open: false,
+      }
+  );
 }

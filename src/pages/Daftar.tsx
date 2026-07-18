@@ -278,8 +278,14 @@ function TicketView({ ticket }: { ticket: Ticket }) {
             <div className="mt-6 border-t border-dashed border-white/15 pt-4">
               <p className="text-sm font-semibold text-amber-300">📸 Screenshot halaman ini</p>
               <p className="text-[12px] text-slate-400 mt-1">
-                Simpan sebagai bukti. Tunjukkan nomor ini saat pengundian.
+                Simpan sebagai bukti. <b>Wajib check-in di lokasi</b> agar nomormu ikut diundi.
               </p>
+              <a
+                href="/checkin"
+                className="mt-3 inline-block w-full rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold py-2.5 transition"
+              >
+                📍 Check-in di Lokasi
+              </a>
             </div>
           </div>
         </div>
